@@ -3,6 +3,7 @@ library(readr)
 library(shiny)
 library(ggplot2)
 library(dplyr)
+library(psych)
 
 #Reading PAS data from github
 ##Need to update so user can upload data
@@ -31,8 +32,6 @@ ui <- fluidPage(
                            ),
 #Panel with correlation, mean performance, and AI data
 ##Might be nice to present summary table of "good" and "bad" hires by cutoff. Or this could be a new tab. 
-##AI Data still needs to be entered
-##Would be nice to show standardized performance by group, t-test and cohen's d, and Adverse Impact Ratio
                   tabPanel("Summary Statistics",
                            br(),
 #Displaying correlation between selected variables
@@ -40,8 +39,16 @@ ui <- fluidPage(
                            br(),
 #Displaying mean standardized perfoormance for cutoff
                            "The selected cutoff results in the following standardized criterion scores.",
-                           tableOutput('scoreSelected')
-##Start AI calculations here
+                           tableOutput('scoreSelected'),
+                           br(),
+#Displaying Cohen's d and adverse impact
+                           textOutput('cohend'),
+                           br(),
+#AI calculations 
+##Given behavior of this code, I think it would be best to break this into two
+##First, a table like the one above showing the number of each group
+##Second, the AI ratio reported as text
+                           textOutput('aiRatio')
                            ),
 ##Would Like to Utilize GPareto to graph solution pareto optimizaton in this tab
                   tabPanel("Reserved" )
@@ -95,6 +102,37 @@ server <- function(input, output, session) {
                      '%' = 100*(n()/nrow(pas)),
              Criterion = mean(zperf,na.rm=T))
   })
+  
+#Reporting Cohen's d and other group differences
+  output$cohend <- renderText({
+    predictorData<-pull(pas%>%filter(!is.na(!!input$predictor))%>%filter(!is.na(!!input$group))%>%select(!!input$predictor))
+    groupingData<-pull(pas%>%filter(!is.na(!!input$predictor))%>%filter(!is.na(!!input$group))%>%select(!!input$group))
+    d<-(cohen.d(predictorData,groupingData))[[1]][[2]]
+    t<-t.test(predictorData~groupingData, var.equal=T)
+    paste0("The difference between the selected groups is ",round(d,2), " standard deviations. ",
+           "The test statistic for this difference is t (",t[[2]],") = ",
+           round(t[[1]],2), ", p = ",round(t[[3]],4)," (two-tailed).")
+  })
+
+#Calculating Adverse Impact Ratio
+  output$aiRatio <- renderText({
+    air<-pas%>%
+      mutate(Score = factor(ifelse(!!input$predictor>=input$cutscore,1,0),
+                            levels=c(0,1),
+                            labels=c("Below Cutoff","At or Above Cutoff")))%>%
+      filter(!is.na(Score)) %>%
+      group_by(Score)%>%
+      count(!!input$group,Score)
+    r1<-air[3,3]/(air[3,3]+air[1,3])
+    r2<-air[4,3]/(air[4,3]+air[2,3])
+    airatio<-min(r1,r2)/max(r1,r2)
+    paste0("At the selected cutoff, the selection ratio for the first and second groups are ",
+           round(r1,4)," and ",round(r2,4),". The adverse impact ratio is ",
+           round(airatio,4),".")
+  })
+  
+##Pareto Optimization with ParetoR.R only works with multiple predictors
+  
  
 }
 
